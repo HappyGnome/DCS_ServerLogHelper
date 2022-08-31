@@ -12,4 +12,5 @@ Configured in **Config\ServerLogHelper.lua**
     * `weekday` - 1 = Sunday, 2 = Monday etc
     * `hour` - (optional) timezone appears to be UTC, but may vary locally
     * `minute` - (optional)
+	
 e.g. `["restarts"] = {{weekday = 2},{weekday = 4},{weekday = 6}}` to restart Mon,Wed,Fri at 00:00
