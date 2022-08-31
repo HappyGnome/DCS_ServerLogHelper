@@ -9,6 +9,7 @@ local socket            = require("socket")
 local net               = require('net')
 local DCS               = require("DCS") 
 local Skin              = require('Skin')
+local U                 = require('me_utilities')
 local Gui               = require('dxgui')
 local DialogLoader      = require('DialogLoader')
 local Static            = require('Static')
@@ -16,10 +17,12 @@ local Tools             = require('tools')
 
 
 ServerLogHelper = {
-	config = {directory = lfs.writedir()..[[Logs\]]},
+	config = {directory = lfs.writedir()..[[Logs\]], ["restarts"] = {}},
 	logFile = io.open(lfs.writedir()..[[Logs\DCS-ServerLogHelper.log]], "w"),
 	slotLookup = {}, -- key = sideID, value = table: key = slotID, value = table returned by DCS.getAvailableSlots
-	currentLogFile = nil
+	currentLogFile = nil,
+	pollFrameTime = 0,
+	endWarningMinutes = {[60] = false, [30]= false, [10] = false}
 }
 
 -----------------------------------------------------------
@@ -68,7 +71,7 @@ ServerLogHelper.obj2str = function(obj)
 		msg = msg..'}'
 	elseif t == 'number' or t == 'string' or t == 'boolean' then
 		msg = msg..obj
-	else
+	elseif t then
 		msg = msg..t
 	end
 	return msg
@@ -113,9 +116,17 @@ end
 --------------------------------------------------------------
 ServerLogHelper.getPlayerUcid = function(id)
 	if DCS.isServer() then 
-		return net.get_player_info(id, 'ucid')
+		local ucid = net.get_player_info(id, 'ucid')
+		if not ucid  then ucid  = '??' end
+		return ucid
 	end
 	return "??"	
+end
+
+ServerLogHelper.getPlayerName = function(id)
+	local name = net.get_player_info(id, 'name')
+	if not name then name = '??' end
+	return name
 end
 
 --------------------------------------------------------------
@@ -150,7 +161,6 @@ ServerLogHelper.doOnMissionLoadEnd = function()
 	for k,v in pairs(myCoalition) do
 		local coaSlots = {}
 		local rawCoaSlots = DCS.getAvailableSlots(k)
-		ServerLogHelper.log(rawCoaSlots)
 		if type(rawCoaSlots) == 'table' then
 			for l,w in pairs(rawCoaSlots) do
 				coaSlots[w.unitId] = w
@@ -158,8 +168,35 @@ ServerLogHelper.doOnMissionLoadEnd = function()
 		end
 		ServerLogHelper.slotLookup[v] = coaSlots
 	end
-	
-	ServerLogHelper.log(ServerLogHelper.slotLookup,ServerLogHelper.currentLogFile,"Available slots:\n")
+
+	if ServerLogHelper.config.restarts then
+
+		local secondsInWeek = os.time()%604800;
+		ServerLogHelper.nextRestart = nil
+
+		--config.restarts = [{weekday = n,hour = m, minute = 0},...]
+		-- weekday = 1 for Sunday
+		for k,v in pairs(ServerLogHelper.config.restarts) do
+			local secondsInWeekRestart = ((v.weekday + 2)%7) * 86400 -- Epoch was a Thursday, v.weekday = 5 for Thursday
+			if v.hour then
+				secondsInWeekRestart = secondsInWeekRestart + (v.hour%24)*3600
+				if v.minute then
+					secondsInWeekRestart = secondsInWeekRestart + (v.minute%60) * 60
+				end
+			end
+			if secondsInWeekRestart<secondsInWeek then secondsInWeekRestart = secondsInWeekRestart + 604800 end
+			if ServerLogHelper.nextRestart == nil or secondsInWeekRestart < ServerLogHelper.nextRestart then
+				ServerLogHelper.nextRestart = secondsInWeekRestart
+			end
+		end	
+		-- ServerLogHelper.nextRestart is now correct relative to week start
+		if ServerLogHelper.nextRestart then
+			ServerLogHelper.nextRestart = ServerLogHelper.nextRestart + os.time() - secondsInWeek
+			ServerLogHelper.log({next = ServerLogHelper.nextRestart, now = os.time()},ServerLogHelper.currentLogFile)
+		end
+	end
+	ServerLogHelper.endWarningMinutes = {[60] = false, [30]= false, [10] = false}
+	--ServerLogHelper.log(ServerLogHelper.slotLookup,ServerLogHelper.currentLogFile,"Available slots:\n")
 end
 
 ServerLogHelper.onPlayerConnect = function(id)
@@ -167,7 +204,7 @@ ServerLogHelper.onPlayerConnect = function(id)
 end
 
 ServerLogHelper.doOnPlayerConnect = function(id)
-	local name = net.get_player_info(id, 'name')
+	local name = ServerLogHelper.getPlayerName(id)
 	local ucid = ServerLogHelper.getPlayerUcid(id)
 	
 	ServerLogHelper.log("Player connected: "..name..". Player ID: "..ucid,ServerLogHelper.currentLogFile)
@@ -178,7 +215,7 @@ ServerLogHelper.onPlayerDisconnect = function(id)
 end
 
 ServerLogHelper.doOnPlayerDisconnect = function(id)
-	local name = net.get_player_info(id, 'name')
+	local name = ServerLogHelper.getPlayerName(id)
 	local ucid = ServerLogHelper.getPlayerUcid(id)
 	
 	local stats = {kills_veh = net.get_stat(id,net.PS_CAR),
@@ -197,16 +234,56 @@ end
 
 ServerLogHelper.doOnPlayerChangeSlot = function(id)
 	
-	local name = net.get_player_info(id, 'name')
+	local name = ServerLogHelper.getPlayerName(id)
 	local ucid = ServerLogHelper.getPlayerUcid(id)
+	
 	local sideId,slotId =  net.get_slot(id)
 	local slotData
 	if ServerLogHelper.slotLookup[sideId] then
 		slotData = ServerLogHelper.slotLookup[sideId][slotId]
 	end
-	
 	ServerLogHelper.log(slotData,ServerLogHelper.currentLogFile, "Player changed slot: "..name..". Player ID: "..ucid..". \n")
 end
 
+ServerLogHelper.onSimulationStop = function()
+	ServerLogHelper.safeCall(ServerLogHelper.doOnSimulationStop)
+end
+
+ServerLogHelper.doOnSimulationStop = function()
+	ServerLogHelper.log(net.get_player_list(),ServerLogHelper.currentLogFile)
+end
+
+ServerLogHelper.onSimulationStart = function()
+	ServerLogHelper.safeCall(ServerLogHelper.doOnSimulationStart)
+end
+
+ServerLogHelper.doOnSimulationStart = function()
+	ServerLogHelper.log(net.get_player_list(),ServerLogHelper.currentLogFile)
+end
+
+ServerLogHelper.onSimulationFrame = function()
+	if ServerLogHelper.pollFrameTime > 599 then
+		if ServerLogHelper.nextRestart ~= nil then
+			local now = os.time()
+			if now > ServerLogHelper.nextRestart then
+				net.load_next_mission()
+			else
+				local notified = false
+				for k,v in pairs(ServerLogHelper.endWarningMinutes) do
+					if not v and now + k*60 > ServerLogHelper.nextRestart then
+						if not notified then
+							net.dostring_in('server','trigger.action.outText(\"Next mission starts in '.. math.floor((ServerLogHelper.nextRestart - now)/60) ..' minutes!\",10)')
+						end
+						ServerLogHelper.endWarningMinutes[k] = true
+						notified = true
+					end
+				end
+			end
+		end
+		ServerLogHelper.pollFrameTime = 0
+	else	
+		ServerLogHelper.pollFrameTime = ServerLogHelper.pollFrameTime + 1
+	end
+end
 --------------------------------------------------------------
 DCS.setUserCallbacks(ServerLogHelper)
