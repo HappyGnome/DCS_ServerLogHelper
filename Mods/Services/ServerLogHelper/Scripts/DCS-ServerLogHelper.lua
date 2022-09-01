@@ -133,6 +133,7 @@ end
 -- CALLBACKS
 
 ServerLogHelper.onMissionLoadBegin = function()
+	if not DCS.isServer() or not DCS.isMultiplayer() then return end
 	ServerLogHelper.safeCall(ServerLogHelper.doOnMissionLoadBegin)
 end
 
@@ -150,6 +151,7 @@ ServerLogHelper.doOnMissionLoadBegin = function()
 end
 
 ServerLogHelper.onMissionLoadEnd = function()
+	if not DCS.isServer() or not DCS.isMultiplayer() then return end
 	ServerLogHelper.safeCall(ServerLogHelper.doOnMissionLoadEnd)
 end
 
@@ -192,7 +194,7 @@ ServerLogHelper.doOnMissionLoadEnd = function()
 		-- ServerLogHelper.nextRestart is now correct relative to week start
 		if ServerLogHelper.nextRestart then
 			ServerLogHelper.nextRestart = ServerLogHelper.nextRestart + os.time() - secondsInWeek
-			ServerLogHelper.log({next = ServerLogHelper.nextRestart, now = os.time()},ServerLogHelper.currentLogFile)
+			net.dostring_in('server','trigger.action.outText(\"Mission scheduled to run until '.. os.date('%c',ServerLogHelper.nextRestart) ..'\",10)')
 		end
 	end
 	ServerLogHelper.endWarningMinutes = {[60] = false, [30]= false, [10] = false}
@@ -200,6 +202,7 @@ ServerLogHelper.doOnMissionLoadEnd = function()
 end
 
 ServerLogHelper.onPlayerConnect = function(id)
+	if not DCS.isServer() or not DCS.isMultiplayer() then return end
 	ServerLogHelper.safeCall(ServerLogHelper.doOnPlayerConnect,{id})
 end
 
@@ -211,6 +214,7 @@ ServerLogHelper.doOnPlayerConnect = function(id)
 end
 
 ServerLogHelper.onPlayerDisconnect = function(id)
+	if not DCS.isServer() or not DCS.isMultiplayer() then return end
 	ServerLogHelper.safeCall(ServerLogHelper.doOnPlayerDisconnect,{id})
 end
 
@@ -229,6 +233,7 @@ ServerLogHelper.doOnPlayerDisconnect = function(id)
 end
 
 ServerLogHelper.onPlayerChangeSlot = function(id)
+	if not DCS.isServer() or not DCS.isMultiplayer() then return end
 	ServerLogHelper.safeCall(ServerLogHelper.doOnPlayerChangeSlot,{id})
 end
 
@@ -246,6 +251,7 @@ ServerLogHelper.doOnPlayerChangeSlot = function(id)
 end
 
 ServerLogHelper.onSimulationStop = function()
+	if not DCS.isServer() or not DCS.isMultiplayer() then return end
 	ServerLogHelper.safeCall(ServerLogHelper.doOnSimulationStop)
 end
 
@@ -254,6 +260,7 @@ ServerLogHelper.doOnSimulationStop = function()
 end
 
 ServerLogHelper.onSimulationStart = function()
+	if not DCS.isServer() or not DCS.isMultiplayer() then return end
 	ServerLogHelper.safeCall(ServerLogHelper.doOnSimulationStart)
 end
 
@@ -263,6 +270,8 @@ end
 
 ServerLogHelper.onSimulationFrame = function()
 	if ServerLogHelper.pollFrameTime > 599 then
+		if not DCS.isServer() or not DCS.isMultiplayer() then return end
+		ServerLogHelper.pollFrameTime = 0
 		if ServerLogHelper.nextRestart ~= nil then
 			local now = os.time()
 			if now > ServerLogHelper.nextRestart then
@@ -279,8 +288,7 @@ ServerLogHelper.onSimulationFrame = function()
 					end
 				end
 			end
-		end
-		ServerLogHelper.pollFrameTime = 0
+		end		
 	else	
 		ServerLogHelper.pollFrameTime = ServerLogHelper.pollFrameTime + 1
 	end
